@@ -1,9 +1,8 @@
 ﻿using Application.Helpers;
+using Core.Constants;
 using Core.Interface;
 using Core.Models;
-using Newtonsoft.Json;
-using System.Reflection.Metadata.Ecma335;
-using System.Text.Json.Serialization;
+using Microsoft.VisualBasic;
 
 namespace Application
 {
@@ -12,7 +11,7 @@ namespace Application
         public Response Solution(Payload payload)
         {
             var load = payload.Load;
-            var sortedPowerplants = Helper.GetPowerplantMeritOrder(payload);
+            var sortedPowerplants = payload.GetPowerplantMeritOrder();
 
             var listsContainer = new ListsContainer().GetPowersList(sortedPowerplants);
 
@@ -29,7 +28,7 @@ namespace Application
             foreach (var plant in sortedPowerplants)
             {
                 //Wind powerplants
-                if ("windturbine".Equals(plant.Type.ToLower())
+                if (ProjectConstants.WINDTURBINE.Equals(plant.Type.ToLower())
                     && plant.PMax != 0)
                 {
                     totalCapacity += plant.PMax.RoundToOneDigit();
@@ -45,7 +44,7 @@ namespace Application
                 }
 
                 // Non-wind powerplants
-                else if(!"windturbine".Equals(plant.Type.ToLower())
+                else if(!ProjectConstants.WINDTURBINE.Equals(plant.Type.ToLower())
                         && plant.PMax != 0)
                 {
                     totalCapacity += plant.PMin.RoundToOneDigit();
@@ -61,7 +60,7 @@ namespace Application
                         continue;
                     }
                     else
-                    {   //If PMin added is less than payload, check if PMax can be added. If not, find the power between PMin and PMax for this plant
+                    {   //If PMin added is less than load, check if PMax can be added. If not, find the power between PMin and PMax for this plant
                         totalCapacity -= plant.PMin;
                         if (load > totalCapacity.RoundToOneDigit() + plant.PMax.RoundToOneDigit())
                         {
@@ -78,7 +77,7 @@ namespace Application
                         }
                         else
                         {
-                            do
+                            while (totalCapacity != load)
                             {
                                 plant.PMin += 0.1.RoundToOneDigit();
                                 totalCapacity += plant.PMin.RoundToOneDigit();
@@ -89,29 +88,24 @@ namespace Application
                                     cost += plant.Cost * plant.PMin.RoundToOneDigit();
                                     result.PowerplantResponses.Add(new PowerplantResponse(plant.Name, plant.PMin.RoundToOneDigit()));
                                 }
-                            }
-                            while (totalCapacity != load);
+                            };
                         }
                     }
                 }
             }
-            if (!CheckIfPayloadReached(result, load))
+
+            Func<Response,double, bool> isLoadReached = (result, load) =>
+            {
+                var computedLoad = result.PowerplantResponses.Sum(plant => plant.Power);
+                return computedLoad.RoundToOneDigit() == load.RoundToOneDigit();
+            };
+
+            if (!isLoadReached(result, load))
             {
                 result = ReProcessLoadBalancing(result, ref totalCapacity, load, sortedPowerplants);
             }
             return result;
 
-        }
-
-        protected bool CheckIfPayloadReached(Response response, double load)
-        {
-            var computedLoad = 0.0;
-            foreach(var plant in response.PowerplantResponses)
-            {
-                computedLoad += plant.Power;
-            }
-            var isReached = computedLoad.RoundToOneDigit() == load.RoundToOneDigit() ? true : false;
-            return isReached;
         }
 
         protected Response ReProcessLoadBalancing(Response response, ref double totalCapacity, double load, List<PowerplantModel> meritOrder)
@@ -134,12 +128,8 @@ namespace Application
             var power = 0.0;
             PowerplantResponse? mostPoweredPlant = null;
 
-            mostPoweredPlant = response.PowerplantResponses.OrderByDescending(item => item.Power).First();
-            //foreach (var plant in response.PowerplantResponses)
-            //{
-            //    mostPoweredPlant = plant.Power > power ? plant : null;
-            //    power = plant.Power > power ? plant.Power : power;
-            //}
+            var maxPower = response.PowerplantResponses.Max(p => p.Power);
+            mostPoweredPlant = response.PowerplantResponses.First(item => item.Power == maxPower);
 
             return mostPoweredPlant;
         }
