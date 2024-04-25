@@ -1,9 +1,7 @@
 using Core.Interface;
 using Core.Models;
 using Microsoft.AspNetCore.Mvc;
-using Microsoft.AspNetCore.Mvc.Infrastructure;
-using Newtonsoft.Json;
-using System.Text;
+
 
 namespace EnergyPractice.Controllers
 {

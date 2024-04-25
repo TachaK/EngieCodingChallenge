@@ -2,7 +2,6 @@
 using Core.Constants;
 using Core.Interface;
 using Core.Models;
-using Microsoft.VisualBasic;
 
 namespace Application
 {
@@ -11,85 +10,36 @@ namespace Application
         public Response Solution(Payload payload)
         {
             var load = payload.Load;
-            var sortedPowerplants = payload.GetPowerplantMeritOrder();
-
-            var listsContainer = new ListsContainer().GetPowersList(sortedPowerplants);
-
-            var powersList = listsContainer.PowersList;
-            var costsList = listsContainer.CostsList;
-            var namesList = listsContainer.NamesList;
-
             var totalCapacity = 0.0;
             var cost = 0.0;
-
             var solutions = new List<PowerplantResponse>();
             var result = new Response();
+            var tempResult = new TemporaryResponseValues();
+            var sortedPowerplants = payload.GetPowerplantMeritOrder();
 
             foreach (var plant in sortedPowerplants)
             {
                 //Wind powerplants
-                if (ProjectConstants.WINDTURBINE.Equals(plant.Type.ToLower())
-                    && plant.PMax != 0)
+                ProcessWindTurbinePlant(plant, load, result, tempResult);
+                if (tempResult.ShouldBreak)
                 {
-                    totalCapacity += plant.PMax.RoundToOneDigit();
-                    if (totalCapacity < load)
-                        result.PowerplantResponses.Add(new PowerplantResponse(plant.Name, plant.PMax.RoundToOneDigit()));
-                    else if (totalCapacity > load)
-                        totalCapacity -= plant.PMax.RoundToOneDigit();
-                    else
-                    {
-                        result.PowerplantResponses.Add(new PowerplantResponse(plant.Name, plant.PMax.RoundToOneDigit()));
-                        break;
-                    }
+                    tempResult.ShouldBreak = false;
+                    break;
                 }
-
                 // Non-wind powerplants
                 else if(!ProjectConstants.WINDTURBINE.Equals(plant.Type.ToLower())
                         && plant.PMax != 0)
                 {
-                    totalCapacity += plant.PMin.RoundToOneDigit();
-                    if (totalCapacity == load)
+                    ProcessGasAndJetFuelPlant(plant, load, result, tempResult);
+                    if (tempResult.ShouldBreak)
                     {
-                        cost += plant.Cost.RoundToOneDigit() * plant.PMin.RoundToOneDigit();
-                        result.PowerplantResponses.Add(new PowerplantResponse(plant.Name, plant.PMin.RoundToOneDigit()));
+                        tempResult.ShouldBreak = false;
                         break;
                     }
-                    else if (totalCapacity > load)
+                    if (tempResult.ShouldContinue)
                     {
-                        totalCapacity -= plant.PMin.RoundToOneDigit();
+                        tempResult.ShouldContinue = false;
                         continue;
-                    }
-                    else
-                    {   //If PMin added is less than load, check if PMax can be added. If not, find the power between PMin and PMax for this plant
-                        totalCapacity -= plant.PMin;
-                        if (load > totalCapacity.RoundToOneDigit() + plant.PMax.RoundToOneDigit())
-                        {
-                            totalCapacity += plant.PMax.RoundToOneDigit();
-                            cost += plant.Cost * plant.PMax.RoundToOneDigit();
-                            result.PowerplantResponses.Add(new PowerplantResponse(plant.Name, plant.PMax.RoundToOneDigit()));
-                            continue;
-                        }
-                        else if (load == totalCapacity.RoundToOneDigit() + plant.PMax.RoundToOneDigit())
-                        {
-                            cost += plant.Cost.RoundToOneDigit() * plant.PMax.RoundToOneDigit();
-                            result.PowerplantResponses.Add(new PowerplantResponse(plant.Name, plant.PMax.RoundToOneDigit()));
-                            break;
-                        }
-                        else
-                        {
-                            while (totalCapacity != load)
-                            {
-                                plant.PMin += 0.1.RoundToOneDigit();
-                                totalCapacity += plant.PMin.RoundToOneDigit();
-                                if (totalCapacity.RoundToOneDigit() != load.RoundToOneDigit())
-                                    totalCapacity -= plant.PMin.RoundToOneDigit();
-                                else
-                                {
-                                    cost += plant.Cost * plant.PMin.RoundToOneDigit();
-                                    result.PowerplantResponses.Add(new PowerplantResponse(plant.Name, plant.PMin.RoundToOneDigit()));
-                                }
-                            };
-                        }
                     }
                 }
             }
@@ -105,8 +55,10 @@ namespace Application
                 result = ReProcessLoadBalancing(result, ref totalCapacity, load, sortedPowerplants);
             }
             return result;
-
         }
+
+
+
 
         protected Response ReProcessLoadBalancing(Response response, ref double totalCapacity, double load, List<PowerplantModel> meritOrder)
         {
@@ -125,7 +77,6 @@ namespace Application
 
         protected PowerplantResponse? GetMostPoweredPlant(Response response)
         {
-            var power = 0.0;
             PowerplantResponse? mostPoweredPlant = null;
 
             var maxPower = response.PowerplantResponses.Max(p => p.Power);
@@ -149,6 +100,73 @@ namespace Application
                 index++;
             }
             return plantName;
+        }
+
+        protected void ProcessWindTurbinePlant(PowerplantModel plant, double load, Response result, TemporaryResponseValues tempResponse)
+        {
+            if (ProjectConstants.WINDTURBINE.Equals(plant.Type.ToLower())
+                && plant.PMax != 0)
+            {
+                tempResponse.TotalCapacity += plant.PMax.RoundToOneDigit();
+                if (tempResponse.TotalCapacity < load)
+                    result.PowerplantResponses.Add(new PowerplantResponse(plant.Name, plant.PMax.RoundToOneDigit()));
+                else if (tempResponse.TotalCapacity > load)
+                    tempResponse.TotalCapacity -= plant.PMax.RoundToOneDigit();
+                else
+                {
+                    result.PowerplantResponses.Add(new PowerplantResponse(plant.Name, plant.PMax.RoundToOneDigit()));
+                    tempResponse.ShouldBreak = true;
+                }
+            }
+        }
+
+        protected void ProcessGasAndJetFuelPlant(PowerplantModel plant, double load, Response result, TemporaryResponseValues tempResponse)
+        {
+            tempResponse.TotalCapacity += plant.PMin.RoundToOneDigit();
+            if (tempResponse.TotalCapacity == load)
+            {
+                result.PowerplantResponses.Add(new PowerplantResponse(plant.Name, plant.PMin.RoundToOneDigit()));
+                tempResponse.ShouldBreak = true;
+            }
+            else if (tempResponse.TotalCapacity > load)
+            {
+                tempResponse.TotalCapacity -= plant.PMin.RoundToOneDigit();
+                tempResponse.ShouldContinue = true;
+            }
+            else
+            {   //If PMin added is less than load, check if PMax can be added. If not, find the power between PMin and PMax for this plant
+                FindPowerBetweenPMinAndPMax(plant, load, result, tempResponse);
+            }
+        }
+
+        protected void FindPowerBetweenPMinAndPMax(PowerplantModel plant, double load, Response result, TemporaryResponseValues tempResponse)
+        {
+            tempResponse.TotalCapacity -= plant.PMin.RoundToOneDigit();
+            if (load > tempResponse.TotalCapacity.RoundToOneDigit() + plant.PMax.RoundToOneDigit())
+            {
+                tempResponse.TotalCapacity += plant.PMax.RoundToOneDigit();
+                result.PowerplantResponses.Add(new PowerplantResponse(plant.Name, plant.PMax.RoundToOneDigit()));
+                tempResponse.ShouldContinue = true;
+            }
+            else if (load == tempResponse.TotalCapacity.RoundToOneDigit() + plant.PMax.RoundToOneDigit())
+            {
+                result.PowerplantResponses.Add(new PowerplantResponse(plant.Name, plant.PMax.RoundToOneDigit()));
+                tempResponse.ShouldBreak = true;
+            }
+            else
+            {
+                while (tempResponse.TotalCapacity != load)
+                {
+                    plant.PMin += 0.1.RoundToOneDigit();
+                    tempResponse.TotalCapacity += plant.PMin.RoundToOneDigit();
+                    if (tempResponse.TotalCapacity.RoundToOneDigit() != load.RoundToOneDigit())
+                        tempResponse.TotalCapacity -= plant.PMin.RoundToOneDigit();
+                    else
+                    {
+                        result.PowerplantResponses.Add(new PowerplantResponse(plant.Name, plant.PMin.RoundToOneDigit()));
+                    }
+                };
+            }
         }
     }
 }
