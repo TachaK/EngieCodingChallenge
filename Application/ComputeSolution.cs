@@ -10,8 +10,6 @@ namespace Application
         public Response Solution(Payload payload)
         {
             var load = payload.Load;
-            var totalCapacity = 0.0;
-            var cost = 0.0;
             var solutions = new List<PowerplantResponse>();
             var result = new Response();
             var tempResult = new TemporaryResponseValues();
@@ -52,7 +50,7 @@ namespace Application
 
             if (!isLoadReached(result, load))
             {
-                result = ReProcessLoadBalancing(result, ref totalCapacity, load, sortedPowerplants);
+                result = ReProcessLoadBalancing(result, tempResult.TotalCapacity, load, sortedPowerplants);
             }
             return result;
         }
@@ -60,7 +58,7 @@ namespace Application
 
 
 
-        protected Response ReProcessLoadBalancing(Response response, ref double totalCapacity, double load, List<PowerplantModel> meritOrder)
+        protected Response ReProcessLoadBalancing(Response response, double totalCapacity, double load, List<PowerplantModel> meritOrder)
         {
             var unusedPowerplant = GetUnusedPlantInMeritOrder(response, meritOrder);
             var mostUsedPowerplant = GetMostPoweredPlant(response);
